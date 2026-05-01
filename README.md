@@ -20,6 +20,7 @@ and work with any compatible harness, including
 
 ```bash
 git clone git@github.com:ebean-orm/skills.git ~/.agents/ebean-skills
+mkdir -p ~/.agents/skills
 ln -sf ~/.agents/ebean-skills/ebean-orm ~/.agents/skills/ebean-orm
 ```
 
