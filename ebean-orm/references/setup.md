@@ -29,6 +29,22 @@ Before modifying any files, ask the user the following questions to determine
 the correct setup path. Record the answers — they affect dependency choices
 in this step and the approach used in Steps 2 and 3.
 
+### Mandatory gate (do not skip)
+
+- Do **not** continue to Step 1+ until the DI path is explicitly recorded.
+- Do **not** infer the **None** path by default. Use **None** only when the user explicitly confirms no DI framework.
+- If the user asks for a partial action (for example, "do only step 3"), keep the previously selected DI path; do not switch paths implicitly.
+
+### DI path precedence (when user has not answered yet)
+
+Use this precedence order:
+
+1. Existing project context (highest priority): if dependencies/config already show Avaje Inject or Spring, select that path.
+2. Explicit user answer in this guide's questions.
+3. Recommended default only when context is genuinely unknown: Avaje Inject.
+
+If context remains ambiguous, ask one multiple-choice clarification question and wait for the answer before editing files.
+
 ### Question 1: Dependency injection framework
 
 > "Does this project use (or will it use) a DI framework? If so, which one?"
@@ -77,7 +93,7 @@ already exist:
 ```xml
 <properties>
     <!-- add this line; use latest stable from https://github.com/ebean-orm/ebean/releases -->
-    <ebean.version>17.2.0</ebean.version>
+    <ebean.version>17.5.0</ebean.version>
 </properties>
 ```
 
@@ -93,7 +109,7 @@ Inside the `<dependencies>` block, add the PostgreSQL JDBC driver:
 <dependency>
     <groupId>org.postgresql</groupId>
     <artifactId>postgresql</artifactId>
-    <version>42.7.8</version>
+    <version>42.7.11</version>
 </dependency>
 ```
 
@@ -133,7 +149,16 @@ for Postgres test instances:
     <version>${ebean.version}</version>
     <scope>test</scope>
 </dependency>
+<dependency>
+    <groupId>io.avaje</groupId>
+    <artifactId>junit</artifactId>
+    <version>1.8</version>
+    <scope>test</scope>
+</dependency>
 ```
+
+The `io.avaje:junit` bundle includes JUnit Jupiter (API + engine) and AssertJ,
+avoiding the need to declare those dependencies separately.
 
 ---
 
@@ -148,12 +173,12 @@ annotation processor. Skip this step if the user chose Spring or no DI.
 <dependency>
     <groupId>io.avaje</groupId>
     <artifactId>avaje-inject</artifactId>
-    <version>11.5</version>
+    <version>12.5</version>
 </dependency>
 <dependency>
     <groupId>io.avaje</groupId>
     <artifactId>avaje-inject-test</artifactId>
-    <version>11.5</version>
+    <version>12.5</version>
     <scope>test</scope>
 </dependency>
 ```
@@ -177,7 +202,7 @@ the final `<annotationProcessorPaths>` block should include both:
     <path> <!-- generate avaje-inject DI code -->
         <groupId>io.avaje</groupId>
         <artifactId>avaje-inject-generator</artifactId>
-        <version>11.5</version>
+        <version>12.5</version>
     </path>
 </annotationProcessorPaths>
 ```
@@ -718,9 +743,19 @@ On CI servers, omit this file so containers are cleaned up after each build.
 
 ---
 
+## Next Steps
+
+- **Add `TestEntityBuilder`** to your test configuration for rapid test data creation
+  with auto-populated random values. See `testing-with-testentitybuilder.md`.
+- **Proceed to Step 3** — production database configuration
+  (`add-ebean-postgres-database-config.md`). Verify this step passes with
+  `mvn verify` before continuing.
+
+---
+
 ## Source: `add-ebean-postgres-database-config.md`
 
-# Guide: Add Ebean ORM (PostgreSQL) to an Existing Maven Project — Step 2: Database Configuration
+# Guide: Add Ebean ORM (PostgreSQL) to an Existing Maven Project — Step 3: Database Configuration
 
 ## Purpose
 
@@ -870,13 +905,17 @@ Database database(Configuration config) {
     return Database.builder()
         .name("db")
         .dataSourceBuilder(dataSource)
-        .skipDataSourceCheck(true)
         .build();
 }
 ```
 
 If the project has a dedicated config-wrapper class (a `@Component` that reads config
 keys), accept it as a parameter instead of `Configuration`.
+
+> **Note:** Injecting `Configuration` requires that `avaje-config` is properly wired
+> into the DI context. If you encounter "No dependency provided for
+> io.avaje.config.Configuration" errors, use `Config.get(...)` static access instead
+> (as shown in Step 2).
 
 ---
 

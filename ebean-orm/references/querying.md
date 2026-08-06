@@ -85,6 +85,7 @@ often the right query shape.
 | Check if at least one row exists | `exists()` | Cheapest choice for boolean existence checks |
 | Load exactly one row by ID or unique key | `findOne()` | Only use when the predicate is truly unique |
 | Load a list of entity beans | `findList()` | Default for list screens and domain logic |
+| Stream rows, usually to map into another type | `findStream()` | For large/unbounded results streamed from the JDBC cursor; close via try-with-resources. For small/bounded results prefer `findList().stream()` |
 | Count matching rows | `findCount()` | Prefer over loading entities just to count |
 | Load a page plus optional total row count | `findPagedList()` | Use when the caller needs pagination metadata |
 | Return DTO/read-model rows | `asDto(...).findList()` | Prefer this over partially loaded entities for API/view models |
@@ -106,6 +107,43 @@ Customer customer = new QCustomer()
 ```
 
 Do **not** use `findOne()` for predicates that can match multiple rows.
+
+### Example - stream and map to another type
+
+Choose based on result size and how you consume it:
+
+- **`findList().stream()`** — executes the query, materialises the rows,
+  **releases the connection**, then streams over an in-memory list. No open
+  database resources and no try-with-resources needed. Prefer this for small or
+  bounded results (e.g. when you apply `setMaxRows`) that you collect anyway.
+- **`findStream()`** — streams rows directly from the JDBC cursor, holding a
+  connection (and an implicit transaction) open for the **whole lifetime of the
+  stream pipeline**. It must be closed with try-with-resources. Prefer it when
+  the result may be large, when you want constant memory, or when you want to
+  short-circuit (`limit`, `findFirst`, `takeWhile`) without loading everything.
+
+```java
+// small, bounded result fully collected -> findList().stream()
+List<PendingPlan> pending = new QCaptureRequest()
+  .collectedAt.isNull()
+  .orderBy().requestedAt.asc()
+  .findList()
+  .stream()
+  .map(r -> new PendingPlan(r.app().getName(), r.hash()))
+  .toList();
+
+// large/unbounded result streamed from the cursor -> findStream() + try-with-resources
+try (Stream<Customer> stream = new QCustomer()
+  .status.equalTo(Status.NEW)
+  .findStream()) {
+  stream
+    .map(...)
+    .forEach(...);
+}
+```
+
+For processing large results one bean at a time, `findEach()` is often the
+simplest choice because it closes the underlying resources automatically.
 
 ---
 
@@ -139,6 +177,49 @@ List<Customer> customers = new QCustomer()
   .findList();
 ```
 
+### Optional predicates - prefer conditional helpers over `if` blocks
+
+When a filter is driven by a nullable/optional parameter, use the built-in
+conditional helpers instead of wrapping predicates in `if` blocks. The query
+stays fluent and reads top-to-bottom, and no predicate is added when the value
+is absent.
+
+| Helper | Adds predicate when | Resulting SQL |
+|--------|---------------------|---------------|
+| `eqIfPresent(v)` | `v != null` | `prop = ?` |
+| `eqIfNotBlank(v)` (String) | `v` non-null and not blank (value is trimmed) | `prop = ?` |
+| `eqOrNull(v)` | always | `(prop = ? or prop is null)` |
+| `inOrEmpty(coll)` | `coll` non-empty | `prop in (...)` (no predicate when empty) |
+| `likeIfPresent` / `ilikeIfPresent` / `startsWithIfPresent` / `istartsWithIfPresent` / `containsIfPresent` / `icontainsIfPresent` (String) | `v != null` | the match expression |
+
+```java
+// Instead of building the query with if blocks:
+QCustomer q = new QCustomer();
+if (name != null && !name.isBlank()) {
+  q.name.eq(name.trim());
+}
+if (status != null) {
+  q.status.eq(status);
+}
+List<Customer> customers = q.findList();
+
+// Prefer the conditional helpers:
+List<Customer> customers = new QCustomer()
+  .name.eqIfNotBlank(name)
+  .status.eqIfPresent(status)
+  .findList();
+```
+
+Use `eqOrNull(v)` when a null column value should also match - for example an
+"any environment" row stored with `env_id is null` should surface under any env
+filter - instead of a hand-rolled `or()/eq()/isNull()/endOr()` block:
+
+```java
+List<CaptureRequest> rows = new QCaptureRequest()
+  .env.name.eqOrNull(envFilter)   // env_name = ? or env_name is null
+  .findList();
+```
+
 ### Agent rule
 
 When adding a new query:
@@ -148,6 +229,10 @@ When adding a new query:
 3. Traverse relationships instead of writing manual join SQL
 4. Keep property references type-safe; avoid string property names unless the API
    specifically requires them
+5. For optional filters, reach for `eqIfPresent` / `eqIfNotBlank` / `inOrEmpty`
+   before writing an `if (param != null)` block, and use `eqOrNull` instead of a
+   manual `or()/eq()/isNull()/endOr()` when the intent is "match this value or a
+   null column"
 
 ---
 
@@ -291,6 +376,9 @@ If you are returning entity beans for read-only use, `setUnmodifiable(true)`
 should be the default recommendation. If the caller needs a mutable model or a
 serialized summary shape, choose mutable entities or DTO projection instead.
 
+If you need cached assoc-one references for unmodifiable graphs, see
+[Immutable bean cache for read-only references](immutable-bean-cache.md).
+
 ---
 
 ## Step 7 - Use `fetchQuery()` for to-many paths and `FetchGroup` for reusable query shapes
@@ -351,6 +439,48 @@ List<Customer> customers = new QCustomer()
 If the caller needs multiple to-many paths or a paged query, be suspicious of a
 plain `fetch(...)` on those paths. `fetchQuery()` is often the safer default.
 
+### `@OneToOne(mappedBy=...)` is EAGER by default — mark it LAZY
+
+The non-owning side of a `@OneToOne` (the side with `mappedBy`) defaults to
+`FetchType.EAGER` per JPA, same as `@ManyToOne`. Unlike a `@ManyToOne`
+reference (which is FK-only until `.fetch()`'d), Ebean's default select for an
+EAGER `@OneToOne(mappedBy=...)` still adds a `left join` to the target table
+on **every** query for the owning entity — even a plain `findById()` — because
+there is no local FK column to use as a lazy reference; the only way to know
+the associated row exists is to join to it.
+
+If that association is rarely needed (e.g. a rarely-read child/detail table),
+this join executes on every load of the parent, including in hot-path list
+queries, and can dominate query cost as more such associations accumulate.
+
+**Always set `fetch = FetchType.LAZY` on `@OneToOne(mappedBy=...)`
+associations unless the association is genuinely needed on (almost) every
+load:**
+
+```java
+@OneToOne(mappedBy = "ebox", fetch = FetchType.LAZY)
+private EboxSensorBoard sensorBoard;
+```
+
+This correctly excludes the join from Ebean's default select clause (verified
+for FK-based, non-shared-primary-key `@OneToOne` relationships — the common
+case). Callers that do need the association can still `.fetch("sensorBoard")`
+explicitly on the query bean.
+
+**Caveat:** the exclusion is driven by Ebean's default-select-clause
+mechanism. It is bypassed if the query has already been switched into an
+"all properties" mode by something other than the deploy-time
+`FetchType.LAZY`/`EAGER` metadata (for example, an active AutoTune profile
+that supplies its own tuned property set). Confirm the join is actually gone
+by checking generated SQL (`LoggedSql` in tests, or query logging) after
+making this change — don't assume it's excluded from the annotation alone.
+
+### Agent rule
+
+Default new `@OneToOne(mappedBy=...)` fields to `fetch = FetchType.LAZY`
+unless there's a clear reason the association is needed on every load. This
+is a one-line, low-risk change that avoids an always-on join.
+
 ---
 
 ## Step 8 - Use DTO projection when the caller does not need entity beans
@@ -382,6 +512,11 @@ List<CustomerSummary> summaries = new QCustomer()
 - the result is not going to be updated and saved back as an entity
 - the query contains formulas or aggregation intended for a read model
 
+`asDto(...)` maps a **flat**, single-row result. If the target DTO itself needs nested
+DTO fields (ToOne/ToMany) mirroring part of the entity graph, use
+`mapTo(Dto.class)` instead — see
+[Mapping entity graphs to DTOs](mapping-entity-graphs-to-dtos.md).
+
 ---
 
 ## Step 9 - Only fall back to raw SQL when the ORM query is not a good fit
@@ -402,6 +537,30 @@ Prefer the following order:
 
 Do **not** jump to raw SQL just because the query joins multiple tables. Query
 beans already handle ordinary relationship traversal well.
+
+### Using `RawSql` with query beans
+
+`RawSql` is not limited to the plain `Query<T>` API - it also works with a
+generated query bean, giving type-safe `where()`/`having()` expressions over
+hand-written SQL. Every generated query bean exposes `setRawSql(...)`:
+
+```java
+RawSql rawSql = RawSqlBuilder.parse("select id, name, status from customer")
+  .columnMapping("id", "id")
+  .columnMapping("name", "name")
+  .columnMapping("status", "status")
+  .create();
+
+List<Customer> customers = new QCustomer()
+  .setRawSql(rawSql)
+  .status.equalTo(Customer.Status.ACTIVE) // typed expression, injected into the parsed WHERE clause
+  .findList();
+```
+
+For the full guide to building `RawSql` - including `unparsed()`,
+`withPlaceholders()` for CTEs/window functions, the `${where}` / `${andWhere}`
+/ `${having}` / `${andHaving}` placeholder reference, and column mapping - see
+[Using `RawSql` with Ebean](using-rawsql-with-ebean.md).
 
 ---
 
@@ -489,4 +648,6 @@ When asked to add or modify an Ebean query:
 
 - [Add Ebean Postgres Maven POM](add-ebean-postgres-maven-pom.md)
 - [Entity Bean Creation](entity-bean-creation.md)
+- [Immutable bean cache for read-only references](immutable-bean-cache.md)
+- [Using `RawSql` with Ebean](using-rawsql-with-ebean.md)
 - [Ebean query docs](https://ebean.io/docs/query/)
