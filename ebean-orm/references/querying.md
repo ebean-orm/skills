@@ -41,6 +41,21 @@ The default recommendation is:
 If query beans are not yet configured, first follow:
 [`add-ebean-postgres-maven-pom.md`](add-ebean-postgres-maven-pom.md)
 
+### Maven multi-module builds
+
+Configure `querybean-generator` in the module that compiles the entity source.
+Maven writes each generated `Q*` source under that module's
+`target/generated-sources/annotations/.../query/`, and the compiled query bean is
+packaged with that module. A consuming service gets the `Q*` type through its
+dependency; it does not generate another copy in its own target directory.
+
+Also enable `ebean-maven-plugin` in every module that compiles code accessing
+query bean properties, such as `new QCustomer().name.eq(...)`. The plugin
+enhances the query-caller bytecode, so enabling it only in the entity module
+does not enhance callers in a separate service module. If a consumer module
+declares `@DtoMapping`, it also needs `querybean-generator` to generate that
+mapping's DTO mapper.
+
 ---
 
 ## Step 1 - Verify the generated `Q*` query bean exists
@@ -620,6 +635,7 @@ them. Query tuning is part of the job.
 | Symptom | Likely cause | Fix |
 |---------|--------------|-----|
 | `Cannot resolve symbol QCustomer` | Query bean generation not configured or build not run | Check the annotation processor and run a build |
+| A query property is `null` when calling `.eq(...)` | The module compiling the query caller is missing Ebean query-bean enhancement | Enable `ebean-maven-plugin` in the caller module |
 | Old `Q*` class still appears after entity rename | Stale generated source/class output | Run a clean rebuild |
 | `findOne()` fails because multiple rows match | Predicate is not unique | Use `findList()` or tighten the predicate |
 | Returned entities only have some fields loaded | `select()` or `FetchGroup` limited the query shape | Add the required fields or switch to DTO projection |

@@ -69,6 +69,11 @@ var customers = new QCustomer()
     .findList();
 ```
 
+For Maven multi-module projects, `Q*` sources are generated in the module that
+owns the entity source; consumer modules get them through their dependency and
+need `ebean-maven-plugin` to enhance code that accesses query bean properties.
+See the query guide for the separate processor placement needed by `@DtoMapping`.
+
 ### Save/Persist
 
 ```java

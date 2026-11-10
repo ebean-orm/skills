@@ -225,6 +225,11 @@ Inside the `<build><plugins>` block, add:
 </plugin>
 ```
 
+In a multi-module project, also add this plugin to every module that compiles
+code accessing query bean properties. It enhances the query-caller bytecode;
+configuring it only in the entity module does not enhance callers in a separate
+service module.
+
 ---
 
 ## Step 6 — Add the querybean-generator annotation processor
@@ -232,6 +237,13 @@ Inside the `<build><plugins>` block, add:
 The `querybean-generator` annotation processor generates type-safe query bean classes
 at compile time. It must be registered as an `annotationProcessorPath` inside
 `maven-compiler-plugin`.
+
+Register it in the module that compiles the entity source. Maven places generated
+`Q*` sources under that module's `target/generated-sources/annotations/.../query/`
+and packages the compiled query beans with that module. A consumer gets them
+through its dependency. If a consumer also declares `@DtoMapping`, register the
+processor there as well to generate the DTO mapper; this does not regenerate the
+entity's `Q*` class.
 
 ### Case A — No existing `maven-compiler-plugin` configuration
 
