@@ -27,6 +27,7 @@ Load the relevant reference guide for the current task. **Only load what you nee
 | Project setup, dependencies, config | [setup](references/setup.md) |
 | Entity modeling, relationships, Lombok | [modeling](references/modeling.md) |
 | Queries, query beans, fetch tuning, DTOs | [querying](references/querying.md) |
+| Entity-to-DTO mapping with `mapTo()` and `@DtoMapping` | [mapping-entity-graphs-to-dtos](references/mapping-entity-graphs-to-dtos.md) |
 | Persist, save, update, delete, transactions | [write-transactions](references/write-transactions.md) |
 | Testing patterns and tools | [testing](references/testing.md) |
 | DB migration generation and execution | [db-migrations](references/db-migrations.md) |

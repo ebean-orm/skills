@@ -458,8 +458,8 @@ associations unless the association is genuinely needed on (almost) every
 load:**
 
 ```java
-@OneToOne(mappedBy = "ebox", fetch = FetchType.LAZY)
-private EboxSensorBoard sensorBoard;
+@OneToOne(mappedBy = "device", fetch = FetchType.LAZY)
+private SensorBoard sensorBoard;
 ```
 
 This correctly excludes the join from Ebean's default select clause (verified

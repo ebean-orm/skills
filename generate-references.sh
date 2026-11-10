@@ -69,6 +69,9 @@ generate_bundle "modeling" "Modeling" \
 generate_bundle "querying" "Querying" \
   writing-ebean-query-beans.md
 
+generate_bundle "mapping-entity-graphs-to-dtos" "Mapping Entity Graphs to DTOs" \
+  mapping-entity-graphs-to-dtos.md
+
 generate_bundle "write-transactions" "Write & Transactions" \
   persisting-and-transactions-with-ebean.md
 
